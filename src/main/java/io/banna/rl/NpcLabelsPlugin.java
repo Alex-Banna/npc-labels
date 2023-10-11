@@ -3,6 +3,8 @@ package io.banna.rl;
 import com.google.common.base.Strings;
 import com.google.common.util.concurrent.Runnables;
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import io.banna.rl.domain.NpcLabel;
 import io.banna.rl.item.ItemUtil;
@@ -14,6 +16,7 @@ import net.runelite.api.KeyCode;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
+import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.NpcDespawned;
@@ -34,10 +37,17 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import java.applet.Applet;
 import java.awt.Color;
+import java.awt.Toolkit;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Slf4j
 @PluginDescriptor(
@@ -113,6 +123,77 @@ public class NpcLabelsPlugin extends Plugin
 	NpcLabelsConfig provideConfig(ConfigManager configManager)
 	{
 		return configManager.getConfig(NpcLabelsConfig.class);
+	}
+
+	@Subscribe
+	public void onCommandExecuted(CommandExecuted commandExecuted)
+	{
+		if (commandExecuted.getCommand().equals("export-npc-labels"))
+		{
+			String exportString  = getExportJson();
+
+			Toolkit.getDefaultToolkit()
+					.getSystemClipboard()
+					.setContents(new StringSelection(exportString), null);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Exported all NPC labels to clipboard", null);
+		}
+		else if (commandExecuted.getCommand().equals("import-npc-labels"))
+		{
+			final String clipboardText;
+			try
+			{
+				clipboardText = Toolkit.getDefaultToolkit()
+						.getSystemClipboard()
+						.getData(DataFlavor.stringFlavor)
+						.toString();
+			}
+			catch (IOException | UnsupportedFlavorException ex)
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Error reading clipboard contents", null);
+				log.warn("error reading clipboard", ex);
+				return;
+			}
+
+			log.debug("Clipboard contents: {}", clipboardText);
+			if (Strings.isNullOrEmpty(clipboardText))
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You don't have any NPC labels in your clipboard", null);
+				return;
+			}
+
+			List<NpcLabel> importLabels;
+			try
+			{
+				// CHECKSTYLE:OFF
+				importLabels = gson.fromJson(clipboardText, new TypeToken<List<NpcLabel>>(){}.getType());
+				// CHECKSTYLE:ON
+			}
+			catch (JsonSyntaxException e)
+			{
+				log.debug("Malformed JSON for clipboard import", e);
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You don't have any NPC labels in your clipboard", null);
+				return;
+			}
+
+			if (importLabels.isEmpty())
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You don't have any NPC labels in your clipboard", null);
+				return;
+			}
+
+			chatboxPanelManager.openTextMenuInput("Are you sure you want to import " + importLabels.size() + " NPC labels?")
+					.option("Yes", () -> importLabels(importLabels))
+					.option("No", Runnables.doNothing())
+					.build();
+		}
+	}
+
+	private void importLabels(List<NpcLabel> importLabels) {
+		for (NpcLabel label : importLabels) {
+			labelMap.put(label.getNpcId(), label);
+		}
+		save();
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Successfully imported " + importLabels.size() + " NPC labels", null);
 	}
 
 	@Subscribe
@@ -256,6 +337,8 @@ public class NpcLabelsPlugin extends Plugin
 					log.info("Adding label [{}] to NPC [{}]", input, npc.getName());
 
 					NpcLabel label = new NpcLabel();
+					label.setNpcId(npc.getId());
+					label.setNpcName(npc.getName());
 					label.setLabel(input);
 					label.setColor(Color.GREEN);
 
@@ -361,12 +444,14 @@ public class NpcLabelsPlugin extends Plugin
 					{
 						clearConfig(npc.getId());
 						labelMap.remove(npc.getId());
+						save();
 					})
 					.option("No", Runnables.doNothing())
 					.build();
 		} else {
 			clearConfig(npc.getId());
 			labelMap.remove(npc.getId());
+			save();
 		}
 	}
 
@@ -375,6 +460,25 @@ public class NpcLabelsPlugin extends Plugin
 			String labelJson = gson.toJson(entry.getValue());
 			configManager.setConfiguration(NpcLabelsConfig.CONFIG_GROUP, LABEL_CONFIG_PREFIX + entry.getKey(), labelJson);
 		}
+	}
+
+	public String getExportJson() {
+		return gson.toJson(configManager.getConfigurationKeys(NpcLabelsConfig.CONFIG_GROUP)
+				.stream()
+				.map(c -> {
+					String[] wholeKeyParts = c.split("\\.");
+					return wholeKeyParts[wholeKeyParts.length - 1];
+				})
+				.filter(key -> key.startsWith(LABEL_CONFIG_PREFIX))
+				.map(key -> {
+					String labelJson = configManager.getConfiguration(NpcLabelsConfig.CONFIG_GROUP, key);
+					if (labelJson == null || "".equals(labelJson)) {
+						return null;
+					}
+					return gson.fromJson(labelJson, NpcLabel.class);
+				})
+				.filter(Objects::nonNull)
+				.collect(Collectors.toList()));
 	}
 
 	private void clearConfig(int npcId) {
