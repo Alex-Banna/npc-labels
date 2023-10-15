@@ -15,6 +15,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.KeyCode;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
+import net.runelite.api.Model;
 import net.runelite.api.NPC;
 import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
@@ -44,9 +45,11 @@ import java.awt.datatransfer.UnsupportedFlavorException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -102,6 +105,9 @@ public class NpcLabelsPlugin extends Plugin
 
 	private List<NPC> relevantNpcs = new ArrayList<>();
 
+	private Set<Integer> visibleNullNpcs = new HashSet<>();
+	private Set<Integer> invisibleNullNpcs = new HashSet<>();
+
 	@Override
 	protected void startUp() throws Exception
 	{
@@ -116,6 +122,7 @@ public class NpcLabelsPlugin extends Plugin
 		log.info("NPC Labels stopped!");
 		save();
 		relevantNpcs.clear();
+		clearNullNpcCache();
 		overlayManager.remove(overlay);
 	}
 
@@ -269,7 +276,7 @@ public class NpcLabelsPlugin extends Plugin
 	@Subscribe
 	public void onNpcSpawned(NpcSpawned npcSpawned) {
 		final NPC npc = npcSpawned.getNpc();
-		if (getNpcLabel(npc) != null) {
+		if (getNpcLabel(npc) != null && !exclude(npc)) {
 			// This is relevant!
 			relevantNpcs.add(npc);
 		}
@@ -293,6 +300,7 @@ public class NpcLabelsPlugin extends Plugin
 		if (gameStateChanged.getGameState() == GameState.LOGIN_SCREEN ||
 				gameStateChanged.getGameState() == GameState.HOPPING) {
 			relevantNpcs.clear();
+			clearNullNpcCache();
 		}
 		if (gameStateChanged.getGameState() == GameState.LOGGED_IN) {
 			rebuildNpcList();
@@ -308,7 +316,7 @@ public class NpcLabelsPlugin extends Plugin
 		}
 
 		for (NPC npc : client.getNpcs()) {
-			if (getNpcLabel(npc) != null) {
+			if (getNpcLabel(npc) != null && !exclude(npc)) {
 				relevantNpcs.add(npc);
 			}
 		}
@@ -499,8 +507,45 @@ public class NpcLabelsPlugin extends Plugin
 		return null;
 	}
 
-	public List<NPC> getRelevantNpcs()
-	{
+	public boolean exclude(NPC npc) {
+		return npc == null || npc.getName() == null || ("null".equals(npc.getName()) && isInvisible(npc));
+	}
+
+	private boolean isInvisible(NPC npc) {
+		final int id = npc.getId();
+
+		if (visibleNullNpcs.contains(id)) {
+			return false;
+		}
+
+		if (invisibleNullNpcs.contains(id)) {
+			return true;
+		}
+
+		Model model = npc.getModel();
+		if (model == null) {
+			invisibleNullNpcs.add(id);
+			return true;
+		}
+
+		// If all the values in model.getFaceColors3() are -1 then the model is invisible
+		for (int value : model.getFaceColors3()) {
+			if (value != -1) {
+				visibleNullNpcs.add(id);
+				return false;
+			}
+		}
+
+		invisibleNullNpcs.add(id);
+		return true;
+	}
+
+	private void clearNullNpcCache() {
+		visibleNullNpcs.clear();
+		invisibleNullNpcs.clear();
+	}
+
+	public List<NPC> getRelevantNpcs() {
 		return relevantNpcs;
 	}
 }
