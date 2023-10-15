@@ -105,9 +105,6 @@ public class NpcLabelsPlugin extends Plugin
 
 	private List<NPC> relevantNpcs = new ArrayList<>();
 
-	private Set<Integer> visibleNullNpcs = new HashSet<>();
-	private Set<Integer> invisibleNullNpcs = new HashSet<>();
-
 	@Override
 	protected void startUp() throws Exception
 	{
@@ -122,7 +119,6 @@ public class NpcLabelsPlugin extends Plugin
 		log.info("NPC Labels stopped!");
 		save();
 		relevantNpcs.clear();
-		clearNullNpcCache();
 		overlayManager.remove(overlay);
 	}
 
@@ -300,7 +296,6 @@ public class NpcLabelsPlugin extends Plugin
 		if (gameStateChanged.getGameState() == GameState.LOGIN_SCREEN ||
 				gameStateChanged.getGameState() == GameState.HOPPING) {
 			relevantNpcs.clear();
-			clearNullNpcCache();
 		}
 		if (gameStateChanged.getGameState() == GameState.LOGGED_IN) {
 			rebuildNpcList();
@@ -508,41 +503,7 @@ public class NpcLabelsPlugin extends Plugin
 	}
 
 	public boolean exclude(NPC npc) {
-		return npc == null || npc.getName() == null || ("null".equals(npc.getName()) && isInvisible(npc));
-	}
-
-	private boolean isInvisible(NPC npc) {
-		final int id = npc.getId();
-
-		if (visibleNullNpcs.contains(id)) {
-			return false;
-		}
-
-		if (invisibleNullNpcs.contains(id)) {
-			return true;
-		}
-
-		Model model = npc.getModel();
-		if (model == null) {
-			invisibleNullNpcs.add(id);
-			return true;
-		}
-
-		// If all the values in model.getFaceColors3() are -1 then the model is invisible
-		for (int value : model.getFaceColors3()) {
-			if (value != -1) {
-				visibleNullNpcs.add(id);
-				return false;
-			}
-		}
-
-		invisibleNullNpcs.add(id);
-		return true;
-	}
-
-	private void clearNullNpcCache() {
-		visibleNullNpcs.clear();
-		invisibleNullNpcs.clear();
+		return npc == null || npc.getName() == null || npc.getName().isEmpty() || "null".equals(npc.getName());
 	}
 
 	public List<NPC> getRelevantNpcs() {
