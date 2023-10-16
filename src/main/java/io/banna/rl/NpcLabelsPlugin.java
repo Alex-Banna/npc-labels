@@ -363,7 +363,7 @@ public class NpcLabelsPlugin extends Plugin
 		}
 
 		chatboxPanelManager.openTextInput("NPC label")
-				.value(existing.getLabel())
+				.value(existing.getLabel() == null ? "" : existing.getLabel())
 				.onDone((input) ->
 				{
 					input = Strings.emptyToNull(input);
